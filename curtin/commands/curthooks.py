@@ -370,7 +370,8 @@ def install_kernel(cfg, target):
         distro.install_packages(fk_packages.split(), target=target)
 
     if kernel_package:
-        distro.install_packages([kernel_package], target=target)
+        distro.install_packages([kernel_package], target=target,
+                                opts=["--no-install-recommends"])
         return
 
     # uname[2] is kernel name (ie: 3.16.0-7-generic)
