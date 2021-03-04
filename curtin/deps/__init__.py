@@ -54,7 +54,8 @@ if not lsb_release()['codename'] in ["precise", "trusty"]:
     REQUIRED_EXECUTABLES.append(('zfs', 'zfsutils-linux'))
     REQUIRED_KERNEL_MODULES.append('zfs')
 
-if not is_uefi_bootable() and 'arm' in get_architecture():
+# always install flash-kernel in arm/arm64
+if 'arm' in get_architecture():
     REQUIRED_EXECUTABLES.append(('flash-kernel', 'flash-kernel'))
 
 
