@@ -1261,8 +1261,40 @@ def install_missing_packages(cfg, target, osfamily=DISTROS.debian):
             if pkg not in needed_packages:
                 needed_packages.add(pkg)
 
+    # Filter out ifupdown network packages on netplan enabled systems.
+    has_netplan = ('nplan' in installed_packages or
+                   'netplan.io' in installed_packages)
+    if 'ifupdown' not in installed_packages and has_netplan:
+        drops = set(['bridge-utils', 'ifenslave', 'vlan'])
+        if needed_packages.union(drops):
+            LOG.debug("Skipping install of %s.  Not needed on netplan system.",
+                      needed_packages.union(drops))
+            needed_packages = needed_packages.difference(drops)
+
+    if needed_packages:
+        to_add = list(sorted(needed_packages))
+        state = util.load_command_environment()
+        with events.ReportEventStack(
+                name=state.get('report_stack_prefix'),
+                reporting_enabled=True, level="INFO",
+                description="Installing packages on target system: " +
+                str(to_add)):
+            distro.install_packages(to_add, target=target, osfamily=osfamily)
+
+
+def install_bootloader_packages(cfg, target, osfamily=DISTROS.debian):
+    ''' describe which operation types will require specific packages
+
+    'custom_config_key': {
+         'pkg1': ['op_name_1', 'op_name_2', ...]
+     }
+    '''
+    installed_packages = distro.get_installed_packages(target)
+    needed_packages = set()
+
     # UEFI requires grub-efi-{arch}. If a signed version of that package
     # exists then it will be installed.
+    # for Non-UEFI system, it will requires arch-specific package.
     if util.is_uefi_bootable():
         uefi_pkgs = ['efibootmgr']
         if osfamily == DISTROS.redhat:
@@ -1301,16 +1333,20 @@ def install_missing_packages(cfg, target, osfamily=DISTROS.debian):
                              osfamily)
         needed_packages.update([pkg for pkg in uefi_pkgs
                                 if pkg not in installed_packages])
-
-    # Filter out ifupdown network packages on netplan enabled systems.
-    has_netplan = ('nplan' in installed_packages or
-                   'netplan.io' in installed_packages)
-    if 'ifupdown' not in installed_packages and has_netplan:
-        drops = set(['bridge-utils', 'ifenslave', 'vlan'])
-        if needed_packages.union(drops):
-            LOG.debug("Skipping install of %s.  Not needed on netplan system.",
-                      needed_packages.union(drops))
-            needed_packages = needed_packages.difference(drops)
+    else:
+        non_uefi_pkgs = []
+        if osfamily == DISTROS.redhat:
+            # reserve for non-uefi Redhat system include x86, x86_64, arm/arm64
+            pass
+        elif osfamily == DISTROS.debian:
+            arch = distro.get_architecture()
+            if arch in ('arm', 'arm64'):
+                non_uefi_pkgs.append('flash-kernel')
+        else:
+            raise ValueError('Unknown bootloader package list for distro: %s' %
+                             osfamily)
+        needed_packages.update([pkg for pkg in non_uefi_pkgs
+                                if pkg not in installed_packages])
 
     if needed_packages:
         to_add = list(sorted(needed_packages))
@@ -1321,6 +1357,7 @@ def install_missing_packages(cfg, target, osfamily=DISTROS.debian):
                 description="Installing packages on target system: " +
                 str(to_add)):
             distro.install_packages(to_add, target=target, osfamily=osfamily)
+
 
 
 def system_upgrade(cfg, target, osfamily=DISTROS.debian):
@@ -1834,6 +1871,12 @@ def builtin_curthooks(cfg, target, state):
             update_initramfs(target, all_kernels=True)
         elif osfamily == DISTROS.redhat:
             redhat_update_initramfs(target, cfg)
+
+    with events.ReportEventStack(
+            name=stack_prefix + '/installing-bootloader',
+            reporting_enabled=True, level="INFO",
+            description="installing target system bootloader"):
+            install_bootloader_packages(cfg, target, osfamily=osfamily)
 
     with events.ReportEventStack(
             name=stack_prefix + '/configuring-bootloader',
