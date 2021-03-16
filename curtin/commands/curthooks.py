@@ -113,22 +113,25 @@ def _update_initramfs_tools(machine=None):
 
     On some architectures there are helper binaries that are also
     used and will be included in the list.
+
+    assign a tuple to describe binaries name and alternative absolute
+    path without installation.
     """
-    tools = ['update-initramfs']
+    tools = [('update-initramfs', '/usr/sbin/update-initramfs')]
     if not machine:
         machine = platform.machine()
     if machine == 's390x':
-        tools.append('zipl')
+        tools.append(('zipl','/sbin/zipl'))
     elif machine == 'aarch64':
-        tools.append('flash-kernel')
+        tools.append(('flash-kernel', '/usr/sbin/flash-kernel'))
     return tools
 
 
 def disable_update_initramfs(cfg, target, machine=None):
     """ Find update-initramfs tools in target and change their name. """
     with util.ChrootableTarget(target) as in_chroot:
-        for tool in _update_initramfs_tools(machine=machine):
-            found = util.which(tool, target=target)
+        for tool, alt_tool in _update_initramfs_tools(machine=machine):
+            found = util.which(tool, target=target) or alt_tool
             if found:
                 LOG.debug('Diverting original %s in target.', tool)
                 rename = found + '.curtin-disabled'
@@ -158,9 +161,9 @@ def enable_update_initramfs(cfg, target, machine=None):
     """ Enable initramfs update tools by restoring their original name. """
     if update_initramfs_is_disabled(target):
         with util.ChrootableTarget(target) as in_chroot:
-            for tool in _update_initramfs_tools(machine=machine):
+            for tool, alt_tool in _update_initramfs_tools(machine=machine):
                 LOG.info('Restoring %s in target for initrd updates.', tool)
-                found = util.which(tool, target=target)
+                found = util.which(tool, target=target) or alt_tool
                 if not found:
                     continue
                 # remove the diverted
@@ -1301,6 +1304,18 @@ def install_missing_packages(cfg, target, osfamily=DISTROS.debian):
                              osfamily)
         needed_packages.update([pkg for pkg in uefi_pkgs
                                 if pkg not in installed_packages])
+    else:
+        non_uefi_pkgs = []
+        if osfamily == DISTROS.redhat:
+            # reserve for non-UEFI redhat
+            pass
+        elif osfamily == DISTROS.debian:
+            arch = distro.get_architecture()
+            if arch in ('arm', 'arm64'):
+                non_uefi_pkgs.append('flash-kernel')
+        needed_packages.update([pkg for pkg in non_uefi_pkgs
+                                if pkg not in installed_packages])
+
 
     # Filter out ifupdown network packages on netplan enabled systems.
     has_netplan = ('nplan' in installed_packages or
